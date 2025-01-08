@@ -11,7 +11,10 @@ import random
 from sklearn.ensemble import RandomForestClassifier
 import socket
 
-# Thread for packet sniffing
+# Thread for packet sniffing      
+##########"This comment is just for testing..don't worry..keep doing your work please" ^_^ ||| *_* ||| ^_^ 
+
+
 class PacketSnifferThread(QThread):
     packet_signal = pyqtSignal(list)  # Signal to send packet data to the UI
     attack_signal = pyqtSignal(str)   # Signal to send attack alerts
