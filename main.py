@@ -12,7 +12,7 @@ from sklearn.ensemble import RandomForestClassifier
 import socket
 
 # Thread for packet sniffing      
-##########"This comment is just for testing..don't worry..keep doing your work please" ^_^ ||| *_* ||| ^_^ 
+##########"This comment is just for testing..don't worry..keep doing your work please" ^_^ ||| *_* ||| ^_^ .
 
 
 class PacketSnifferThread(QThread):
