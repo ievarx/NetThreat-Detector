@@ -6,9 +6,7 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton,
                              QLineEdit, QStatusBar, QDialog, QLabel, QGridLayout, QFileDialog)
 from PyQt5.QtCore import QThread, pyqtSignal
 from scapy.all import AsyncSniffer, IP, TCP, UDP
-import nmap
 import random
-from sklearn.ensemble import RandomForestClassifier
 import socket
 
 # Thread for packet sniffing
@@ -56,12 +54,6 @@ class PacketSnifferThread(QThread):
         protocols = {1: "ICMP", 6: "TCP", 17: "UDP"}
         return protocols.get(proto, "Unknown")
 
-    def detect_attack(self, src_ip):
-        # Basic attack detection logic
-        # You can replace this with more advanced logic based on a trained AI model
-        if self.packet_counts.get(src_ip, 0) > 10:
-            self.attack_signal.emit(f"Possible attack detected from {src_ip}")
-
     def stop_sniffing(self):
         self.is_sniffing = False
         self.sniffer.stop()
@@ -97,11 +89,6 @@ class App(QWidget):
         self.stop_capture_button = QPushButton('Stop Capture')
         self.stop_capture_button.clicked.connect(self.stop_capture)
         layout.addWidget(self.stop_capture_button)
-
-        # Run Nmap button
-        self.nmap_button = QPushButton('Run Nmap')
-        self.nmap_button.clicked.connect(self.run_nmap)
-        layout.addWidget(self.nmap_button)
 
         # Table to display packets
         self.packet_table = QTableWidget()
@@ -195,9 +182,6 @@ class App(QWidget):
         details_dialog.setLayout(layout)
         details_dialog.exec_()
 
-    def show_attack_alert(self, alert_msg):
-        self.status_bar.showMessage(alert_msg, 5000)
-
     def save_to_database(self):
         # Save the current data to the fixed database
         self.conn.commit()
@@ -213,17 +197,6 @@ class App(QWidget):
             layout.addWidget(QLabel(str(row)))
         show_data_dialog.setLayout(layout)
         show_data_dialog.exec_()
-
-    def run_nmap(self):
-        # Running Nmap functionality
-        try:
-            target = "127.0.0.1"  # Example target IP
-            nm = nmap.PortScanner()
-            nm.scan(target, '1-1024')  # Sample scan range
-            print(nm.all_hosts())  # Print scan result for now
-            self.status_bar.showMessage(f"Nmap scan completed: {nm.all_hosts()}", 5000)
-        except Exception as e:
-            self.status_bar.showMessage(f"Error: {str(e)}", 5000)
 
     def stop_capture(self):
         # Stop the packet sniffer
