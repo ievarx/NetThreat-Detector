@@ -47,8 +47,7 @@ class PacketSnifferThread(QThread):
             packet_data = [src, dst, protocol_name, length, ttl, timestamp, src_port, dst_port]
             self.packet_signal.emit(packet_data)
 
-            # Trigger attack detection
-            self.detect_attack(src)
+           
 
     def get_protocol_name(self, proto):
         protocols = {1: "ICMP", 6: "TCP", 17: "UDP"}
@@ -141,7 +140,7 @@ class App(QWidget):
         interface = self.interface_combo.currentText()
         self.sniffer_thread = PacketSnifferThread(interface)
         self.sniffer_thread.packet_signal.connect(self.add_packet)
-        self.sniffer_thread.attack_signal.connect(self.show_attack_alert)
+
         self.sniffer_thread.start()
 
     def add_packet(self, packet_data):
