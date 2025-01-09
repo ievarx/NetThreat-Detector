@@ -6,19 +6,15 @@ from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton,
                              QLineEdit, QStatusBar, QDialog, QLabel, QGridLayout, QFileDialog)
 from PyQt5.QtCore import QThread, pyqtSignal
 from scapy.all import AsyncSniffer, IP, TCP, UDP
-import random
-import socket
 
 # Thread for packet sniffing
 class PacketSnifferThread(QThread):
     packet_signal = pyqtSignal(list)  # Signal to send packet data to the UI
-    attack_signal = pyqtSignal(str)   # Signal to send attack alerts
 
     def __init__(self, interface):
         super().__init__()
         self.interface = interface
         self.sniffer = None
-        self.packet_counts = {}
         self.is_sniffing = True
 
     def run(self):
@@ -42,12 +38,8 @@ class PacketSnifferThread(QThread):
                 dst_port = packet.dport
 
             protocol_name = self.get_protocol_name(protocol)
-            self.packet_counts[src] = self.packet_counts.get(src, 0) + 1
-
             packet_data = [src, dst, protocol_name, length, ttl, timestamp, src_port, dst_port]
             self.packet_signal.emit(packet_data)
-
-           
 
     def get_protocol_name(self, proto):
         protocols = {1: "ICMP", 6: "TCP", 17: "UDP"}
@@ -112,7 +104,6 @@ class App(QWidget):
         self.show_db_button.clicked.connect(self.show_data)
         layout.addWidget(self.show_db_button)
 
-
         # Layout setup
         self.setLayout(layout)
         self.resize(800, 600)
@@ -140,7 +131,6 @@ class App(QWidget):
         interface = self.interface_combo.currentText()
         self.sniffer_thread = PacketSnifferThread(interface)
         self.sniffer_thread.packet_signal.connect(self.add_packet)
-
         self.sniffer_thread.start()
 
     def add_packet(self, packet_data):
