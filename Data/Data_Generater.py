@@ -9,13 +9,13 @@ network_devices = [
 
 # قائمة أجهزة المهاجمين (  مجموعة فرعية من network_devices)
 attacker_ips = [
-    "192.168.1.160", "192.168.3.30" 
+    "192.168.1.160", "192.168.3.30" ]
 
 # عنوان الضحية (Target)
 victim_ip = "192.168.1.120"
 
 data = []
-num_packets = 10000  # عدد الحزم
+num_packets = 500000  # عدد الحزم
 previous_time = 0     # لتتبع الزمن 
 
 for i in range(num_packets):
