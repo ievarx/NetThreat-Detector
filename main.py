@@ -1,237 +1,108 @@
-import sys
+import os
 import time
-import sqlite3
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QPushButton, 
-                             QTableWidget, QTableWidgetItem, QComboBox, 
-                             QLineEdit, QStatusBar, QDialog, QLabel, QGridLayout, QFileDialog)
-from PyQt5.QtCore import QThread, pyqtSignal
+import joblib
+import pandas as pd
+from collections import defaultdict
 from scapy.all import AsyncSniffer, IP, TCP, UDP
-import nmap
-import random
-from sklearn.ensemble import RandomForestClassifier
-import socket
+from colorama import init, Fore, Style
 
-# Thread for packet sniffing
-class PacketSnifferThread(QThread):
-    packet_signal = pyqtSignal(list)  # Signal to send packet data to the UI
-    attack_signal = pyqtSignal(str)   # Signal to send attack alerts
+init(autoreset=True)
 
-    def __init__(self, interface):
-        super().__init__()
-        self.interface = interface
-        self.sniffer = None
-        self.packet_counts = {}
-        self.is_sniffing = True
+def display_banner():
+    os.system("clear" if os.name == "posix" else "cls")
+    banner = f"""
+{Fore.LIGHTBLACK_EX}{'-' * 72}
+-{Fore.RED}{'#' * 70}-
+-{Fore.RED}-# {' ' * 66}#-
+-{Fore.RED}-# {'Optimized AI Model for DDoS Attacks Detection':^66}#-
+-{Fore.RED}-# {' ' * 66}#-
+-{Fore.RED}{'#' * 31}[v1.0.1]{'#' * 31}-
+{Fore.LIGHTBLACK_EX}{'-' * 72}
+"""
+    print(banner)
 
-    def run(self):
-        self.sniffer = AsyncSniffer(iface=self.interface, prn=self.process_packet)
-        self.sniffer.start()
 
-    def process_packet(self, packet):
-        if not self.is_sniffing:
-            return
+def ip_to_parts(ip):
+    return list(map(int, ip.split('.')))
+
+def get_protocol_name(proto):
+    protocols = {1: "ICMP", 6: "TCP", 17: "UDP"}
+    return protocols.get(proto, "Unknown")
+
+def preprocess_packet(packet_data):
+    src_parts = ip_to_parts(packet_data[0])  
+    dst_parts = ip_to_parts(packet_data[1]) 
+    return [
+        0, packet_data[2], packet_data[3], 0, 0, 0, 0,
+        *src_parts, *dst_parts
+    ]
+
+attack_counter_live = defaultdict(int)
+
+def process_packet(packet):
+    try:
         if IP in packet:
-            src = packet[IP].src
-            dst = packet[IP].dst
-            protocol = packet[IP].proto
-            length = len(packet)
-            ttl = packet[IP].ttl
-            timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
+            src, dst, proto, length, ttl = packet[IP].src, packet[IP].dst, packet[IP].proto, len(packet), packet[IP].ttl
+            src_port, dst_port = (packet.sport, packet.dport) if TCP in packet or UDP in packet else (None, None)
+            protocol_name = get_protocol_name(proto)
+            
+            if protocol_name == "ICMP":
+                processed_data = preprocess_packet([src, dst, proto, length, ttl, time.time(), src_port, dst_port])
+                result = model.predict(pd.DataFrame([processed_data], columns=model.feature_names_in_))
+                status, color = ("Attack Detected!", Fore.RED) if result == 1 else ("Normal", Fore.GREEN)
+                
+                if result == 1:
+                    attack_counter_live[src] += 1
+            else:
+                status, color = "Normal (Non-ICMP)", Fore.GREEN
+            
+            print(f"{color}Source: {src}, Destination: {dst}, Protocol: {protocol_name}, Status: {status}{Style.RESET_ALL}")
+    except Exception as e:
+        print(f"Error processing packet: {e}")
 
-            src_port, dst_port = None, None
-            if TCP in packet or UDP in packet:
-                src_port = packet.sport
-                dst_port = packet.dport
+def start_sniffing():
+    print("Starting packet capture...")
+    sniffer = AsyncSniffer(prn=process_packet, store=False)
+    sniffer.start()
+    return sniffer
 
-            protocol_name = self.get_protocol_name(protocol)
-            self.packet_counts[src] = self.packet_counts.get(src, 0) + 1
+def analyze_csv(file):
+    data = pd.read_csv(file)
+    data[['Source_1', 'Source_2', 'Source_3', 'Source_4']] = pd.DataFrame(data['Source'].apply(ip_to_parts).to_list(), index=data.index)
+    data[['Destination_1', 'Destination_2', 'Destination_3', 'Destination_4']] = pd.DataFrame(data['Destination'].apply(ip_to_parts).to_list(), index=data.index)
+    
+    features = ["Time", "Protocol", "Length", "ICMP Type", "ICMP Code", "Traffic Rate", "Packet Interval", "Source_1", "Source_2", "Source_3", "Source_4", "Destination_1", "Destination_2", "Destination_3", "Destination_4"]
+    predictions = model.predict(data[features])
+    
+    attack_counter = defaultdict(int)
+    for i, ip in enumerate(data['Source']):  
+        if predictions[i] == 1:
+            attack_counter[ip] += 1
+    
+    for ip, count in attack_counter.items():
+        if count > 100:
+            print(Fore.RED+f"IP {ip} is considered an attacker with {count} attacks.")
 
-            packet_data = [src, dst, protocol_name, length, ttl, timestamp, src_port, dst_port]
-            self.packet_signal.emit(packet_data)
-
-            # Trigger attack detection
-            self.detect_attack(src)
-
-    def get_protocol_name(self, proto):
-        protocols = {1: "ICMP", 6: "TCP", 17: "UDP"}
-        return protocols.get(proto, "Unknown")
-
-    def detect_attack(self, src_ip):
-        # Basic attack detection logic
-        # You can replace this with more advanced logic based on a trained AI model
-        if self.packet_counts.get(src_ip, 0) > 10:
-            self.attack_signal.emit(f"Possible attack detected from {src_ip}")
-
-    def stop_sniffing(self):
-        self.is_sniffing = False
-        self.sniffer.stop()
-
-# Main app window
-class App(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.initUI()
-        self.packet_data = []
-        self.init_db()
-
-    def initUI(self):
-        self.setWindowTitle('Network Threat Detection Tool')
-        layout = QVBoxLayout()
-
-        # Network interface selection
-        self.interface_combo = QComboBox()
-        self.interface_combo.addItems(['WiFi'])
-        layout.addWidget(self.interface_combo)
-
-        # Filter input
-        self.filter_input = QLineEdit()
-        self.filter_input.setPlaceholderText('Filter by Source IP...')
-        layout.addWidget(self.filter_input)
-
-        # Start capture button
-        self.capture_button = QPushButton('Start Capture')
-        self.capture_button.clicked.connect(self.start_capture)
-        layout.addWidget(self.capture_button)
-
-        # Stop capture button
-        self.stop_capture_button = QPushButton('Stop Capture')
-        self.stop_capture_button.clicked.connect(self.stop_capture)
-        layout.addWidget(self.stop_capture_button)
-
-        # Run Nmap button
-        self.nmap_button = QPushButton('Run Nmap')
-        self.nmap_button.clicked.connect(self.run_nmap)
-        layout.addWidget(self.nmap_button)
-
-        # Table to display packets
-        self.packet_table = QTableWidget()
-        self.packet_table.setColumnCount(8)
-        self.packet_table.setHorizontalHeaderLabels(['Source IP', 'Destination IP', 
-                                                     'Protocol', 'Length', 'TTL', 
-                                                     'Timestamp', 'Source Port', 'Dest Port'])
-        self.packet_table.cellClicked.connect(self.show_packet_details)
-        layout.addWidget(self.packet_table)
-
-        # Status bar
-        self.status_bar = QStatusBar()
-        layout.addWidget(self.status_bar)
-
-        # Save to database button
-        self.save_db_button = QPushButton('Save to Database')
-        self.save_db_button.clicked.connect(self.save_to_database)
-        layout.addWidget(self.save_db_button)
-
-        # Show data button
-        self.show_db_button = QPushButton('Show Data')
-        self.show_db_button.clicked.connect(self.show_data)
-        layout.addWidget(self.show_db_button)
-
-
-        # Layout setup
-        self.setLayout(layout)
-        self.resize(800, 600)
-
-        # Filter change event
-        self.filter_input.textChanged.connect(self.update_table)
-
-    def init_db(self):
-        # Initialize the database with a fixed name
-        self.conn = sqlite3.connect('packets.db')  # Fixed database file
-        self.cursor = self.conn.cursor()
-        
-        self.cursor.execute('''CREATE TABLE IF NOT EXISTS packets (
-                               source_ip TEXT, 
-                               destination_ip TEXT, 
-                               protocol TEXT, 
-                               length INTEGER, 
-                               ttl INTEGER, 
-                               timestamp TEXT, 
-                               source_port INTEGER, 
-                               dest_port INTEGER)''')
-        self.conn.commit()
-
-    def start_capture(self):
-        interface = self.interface_combo.currentText()
-        self.sniffer_thread = PacketSnifferThread(interface)
-        self.sniffer_thread.packet_signal.connect(self.add_packet)
-        self.sniffer_thread.attack_signal.connect(self.show_attack_alert)
-        self.sniffer_thread.start()
-
-    def add_packet(self, packet_data):
-        # Add packet to table and database
-        self.packet_data.append(packet_data)
-        self.update_table()
-
-        self.cursor.execute('''INSERT INTO packets 
-                               (source_ip, destination_ip, protocol, length, ttl, timestamp, source_port, dest_port) 
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''', packet_data)
-        self.conn.commit()
-
-    def update_table(self):
-        # Update table with packet data and filter applied
-        self.packet_table.setRowCount(0)
-        filter_text = self.filter_input.text()
-
-        for row_data in self.packet_data:
-            if filter_text in row_data[0]:  # Filter by source IP
-                row_position = self.packet_table.rowCount()
-                self.packet_table.insertRow(row_position)
-                for col_idx, item in enumerate(row_data):
-                    self.packet_table.setItem(row_position, col_idx, QTableWidgetItem(str(item)))
-
-    def show_packet_details(self, row, column):
-        packet_data = self.packet_data[row]
-        details_dialog = QDialog(self)
-        details_dialog.setWindowTitle("Packet Details")
-
-        layout = QGridLayout()
-        labels = ['Source IP', 'Destination IP', 'Protocol', 'Length', 'TTL', 
-                  'Timestamp', 'Source Port', 'Destination Port']
-        
-        for i, label in enumerate(labels):
-            layout.addWidget(QLabel(label), i, 0)
-            layout.addWidget(QLabel(str(packet_data[i])), i, 1)
-        
-        details_dialog.setLayout(layout)
-        details_dialog.exec_()
-
-    def show_attack_alert(self, alert_msg):
-        self.status_bar.showMessage(alert_msg, 5000)
-
-    def save_to_database(self):
-        # Save the current data to the fixed database
-        self.conn.commit()
-
-    def show_data(self):
-        self.cursor.execute("SELECT * FROM packets")
-        data = self.cursor.fetchall()
-
-        # Show data in a popup
-        show_data_dialog = QDialog(self)
-        layout = QVBoxLayout()
-        for row in data:
-            layout.addWidget(QLabel(str(row)))
-        show_data_dialog.setLayout(layout)
-        show_data_dialog.exec_()
-
-    def run_nmap(self):
-        # Running Nmap functionality
+if __name__ == "__main__":
+    display_banner()
+    model = joblib.load('PKL/svm_octa_icmp_pod_model.pkl')
+    
+    choice = input(Fore.LIGHTBLACK_EX + "\n[1] CSV-file Analyzer\n[2] Live Traffic Detection\n\nEnter your choice: ")
+    
+    if choice == "1":
+        file_path = input("Enter the CSV file path: ")
+        analyze_csv(file_path)
+    elif choice == "2":
         try:
-            target = "127.0.0.1"  # Example target IP
-            nm = nmap.PortScanner()
-            nm.scan(target, '1-1024')  # Sample scan range
-            print(nm.all_hosts())  # Print scan result for now
-            self.status_bar.showMessage(f"Nmap scan completed: {nm.all_hosts()}", 5000)
-        except Exception as e:
-            self.status_bar.showMessage(f"Error: {str(e)}", 5000)
-
-    def stop_capture(self):
-        # Stop the packet sniffer
-        self.sniffer_thread.stop_sniffing()
-
-
-if __name__ == '__main__':
-    app = QApplication(sys.argv)
-    window = App()
-    window.show()
-    sys.exit(app.exec_())
+            sniffer = start_sniffing()
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\nStopping packet capture...")
+            sniffer.stop()
+            print("\nAttack Summary:")
+            for ip, count in attack_counter_live.items():
+                if count > 0:
+                    print(Fore.RED + f"IP {ip} detected with {count} attack(s).")
+    else:
+        print(Fore.RED + "Invalid choice!")
